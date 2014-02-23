@@ -631,6 +631,7 @@ namespace UCIS.FBGUI {
 		public IFramebuffer Framebuffer { get; private set; }
 		private Bitmap Frontbuffer = null;
 		protected Object RenderLock = new object();
+		private Object StatusLock = new object();
 		public event EventHandler<InvalidateEventArgs> Painted;
 		protected Size size = Size.Empty;
 		private ThreadingTimer PaintTimer = null;
@@ -639,29 +640,28 @@ namespace UCIS.FBGUI {
 		public Boolean SuspendDrawing {
 			get { return suspenddrawing; }
 			set {
+				lock (StatusLock) suspenddrawing = value;
+				if (value) return;
 				lock (RenderLock) {
-					suspenddrawing = value;
-					if (!value) {
-						Refresh(DirtyRectangle);
-						DirtyRectangle = Rectangle.Empty;
-					}
+					Refresh(DirtyRectangle);
+					DirtyRectangle = Rectangle.Empty;
 				}
 			}
 		}
 		public int RedrawDelay {
 			get { return PaintDelay; }
 			set {
-				lock (RenderLock) {
+				lock (StatusLock) {
 					if (value < 0) throw new ArgumentOutOfRangeException("value");
 					PaintDelay = value;
 					if (PaintDelay == 0) {
 						if (PaintTimer != null) PaintTimer.Dispose();
 						PaintTimer = null;
-						if (PaintScheduled) PaintTimerCallback(null);
 					} else {
 						PaintTimer = new ThreadingTimer(PaintTimerCallback);
 					}
 				}
+				if (PaintScheduled) PaintTimerCallback(null);
 			}
 		}
 		private Boolean suspenddrawing = false;
@@ -710,7 +710,8 @@ namespace UCIS.FBGUI {
 		}
 		public override void Invalidate(Rectangle rect) {
 			if (rect.Width == 0 || rect.Height == 0) return;
-			lock (RenderLock) {
+			Boolean drawDirect = false;
+			lock (StatusLock) {
 				if (SuspendDrawing || PaintTimer != null) {
 					DirtyRectangle = DirtyRectangle.IsEmpty ? rect : Rectangle.Union(DirtyRectangle, rect);
 					if (!SuspendDrawing && !PaintScheduled) {
@@ -718,17 +719,20 @@ namespace UCIS.FBGUI {
 						PaintTimer.Change(PaintDelay, Timeout.Infinite);
 					}
 				} else {
-					Refresh(rect);
+					drawDirect = true;
 				}
 			}
+			if (drawDirect) Refresh(rect);
 		}
 		private void PaintTimerCallback(Object state) {
 			try {
-				lock (RenderLock) {
+				Rectangle rect;
+				lock (StatusLock) {
 					PaintScheduled = false;
-					Refresh(DirtyRectangle);
+					rect = DirtyRectangle;
 					DirtyRectangle = Rectangle.Empty;
 				}
+				Refresh(rect);
 			} catch (Exception ex) {
 				Debug.WriteLine(ex);
 				Console.Error.WriteLine(ex);
@@ -777,7 +781,7 @@ namespace UCIS.FBGUI {
 			return true;
 		}
 		public virtual void Dispose() {
-			lock (RenderLock) {
+			lock (StatusLock) {
 				if (PaintTimer != null) PaintTimer.Dispose();
 				PaintTimer = null;
 			}
