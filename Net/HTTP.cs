@@ -99,7 +99,7 @@ namespace UCIS.Net.HTTP {
 
 		public Socket Socket { get; private set; }
 		public Boolean SuppressStandardHeaders { get; set; }
-		public TCPStream TCPStream { get; private set; }
+		public TCPStream TCPStream { get { return Reader.BaseStream as TCPStream; } }
 
 		private StreamWriter Writer;
 		private PrebufferingStream Reader;
@@ -411,14 +411,10 @@ namespace UCIS.Net.HTTP {
 				if (socket.ProtocolType == ProtocolType.Tcp) socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
 				if (stream == null) stream = new NetworkStream(socket, true);
 			}
-			Init(stream);
-		}
-
-		private void Init(Stream Stream) {
-			Writer = new StreamWriter(Stream, Encoding.ASCII);
+			Writer = new StreamWriter(stream, Encoding.ASCII);
 			Writer.NewLine = "\r\n";
 			Writer.AutoFlush = true;
-			Reader = new PrebufferingStream(Stream);
+			Reader = new PrebufferingStream(stream);
 			Reader.BeginPrebuffering(PrebufferCallback, null);
 		}
 
@@ -470,14 +466,22 @@ namespace UCIS.Net.HTTP {
 				RequestPath = Uri.UnescapeDataString(request[0]);
 				RequestQuery = request.Length > 1 ? request[1] : null;
 				RequestHeaders = new List<HTTPHeader>();
+				String headerName = null, headerValue = null;
 				while (true) {
 					line = ReadLine();
 					if (line == null) goto SendError400AndClose;
 					if (line.Length == 0) break;
-					request = line.Split(new String[] { ": " }, 2, StringSplitOptions.None);
-					if (request.Length != 2) goto SendError400AndClose;
-					RequestHeaders.Add(new HTTPHeader(request[0], request[1]));
+					if (line[0] == ' ' || line[0] == '\t') {
+						headerValue += line;
+					} else {
+						if (headerName != null) RequestHeaders.Add(new HTTPHeader(headerName, (headerValue ?? String.Empty).TrimStart()));
+						request = line.Split(new Char[] { ':' }, 2, StringSplitOptions.None);
+						if (request.Length != 2) goto SendError400AndClose;
+						headerName = request[0];
+						headerValue = request[1];
+					}
 				}
+				if (headerName != null) RequestHeaders.Add(new HTTPHeader(headerName, (headerValue ?? String.Empty).TrimStart()));
 				IHTTPContentProvider content = Server.ContentProvider;
 				if (content == null) goto SendError500AndClose;
 				State = HTTPConnectionState.ProcessingRequest;
@@ -732,8 +736,14 @@ namespace UCIS.Net.HTTP {
 		}
 
 		private void SendErrorAndClose(int code) {
-			SendErrorResponse(code);
-			Close();
+			try {
+				SendErrorResponse(code);
+			} catch (IOException) {
+			} catch (SocketException) {
+			} catch (ObjectDisposedException) {
+			} finally {
+				Close();
+			}
 		}
 		private void Close() {
 			if (State == HTTPConnectionState.Closed) return;
