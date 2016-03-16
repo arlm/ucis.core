@@ -155,7 +155,7 @@ namespace UCIS.USBLib.Communication.LibUsb {
 			}
 		}
 		public override unsafe IAsyncResult BeginControlTransfer(UsbControlRequestType requestType, byte request, short value, short index, byte[] buffer, int offset, int length, AsyncCallback callback, Object state) {
-			if (offset < 0 || length < 0 || (buffer == null && length != 0) || offset + length > buffer.Length) throw new ArgumentOutOfRangeException("length", "The specified offset and length exceed the buffer length");
+			if (offset < 0 || length < 0 || (buffer == null && length != 0) || (buffer != null && offset + length > buffer.Length)) throw new ArgumentOutOfRangeException("length", "The specified offset and length exceed the buffer length");
 			int code;
 			Byte[] inbuffer;
 			if ((requestType & UsbControlRequestType.EndpointMask) == UsbControlRequestType.EndpointIn) {
