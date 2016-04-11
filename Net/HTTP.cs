@@ -63,8 +63,10 @@ namespace UCIS.Net.HTTP {
 			Socket socket = (Socket)args[0];
 			SslStream ssl = (SslStream)args[1];
 			Stream streamwrapper = (Stream)args[2];
+			IDisposable timeout = (IDisposable)args[3];
 			try {
 				ssl.EndAuthenticateAsServer(ar);
+				timeout.Dispose();
 				new HTTPContext(this, ssl, socket, -1, true);
 			} catch (Exception ex) {
 				RaiseOnError(this, ex);
@@ -82,7 +84,7 @@ namespace UCIS.Net.HTTP {
 			try {
 				if (SSLCertificate != null) {
 					SslStream ssl = new SslStream(streamwrapper);
-					ssl.BeginAuthenticateAsServer(SSLCertificate, SslAuthenticationCallback, new Object[] { socket, ssl, streamwrapper });
+					ssl.BeginAuthenticateAsServer(SSLCertificate, SslAuthenticationCallback, new Object[] { socket, ssl, streamwrapper, new TimedDisposer(ssl, 10000) });
 				} else {
 					new HTTPContext(this, streamwrapper, socket, -1, false);
 				}
@@ -514,7 +516,7 @@ namespace UCIS.Net.HTTP {
 					Close();
 					return;
 				}
-				if (Server.ServeFlashPolicyFile && line[0] == '<') { //<policy-file-request/>
+				if (Server.ServeFlashPolicyFile && line.Length > 0 && line[0] == '<') { //<policy-file-request/>
 					StreamWriter writer = new StreamWriter(Reader, Encoding.ASCII) { NewLine = "\r\n", AutoFlush = false };
 					writer.WriteLine("<cross-domain-policy><allow-access-from domain=\"*\" to-ports=\"*\" /></cross-domain-policy>");
 					writer.Flush();
@@ -823,7 +825,12 @@ namespace UCIS.Net.HTTP {
 			State = HTTPConnectionState.Completed;
 			if (KeepAlive && KeepAliveMaxRequests > 1) {
 				State = HTTPConnectionState.Closed;
-				new HTTPContext(Server, Reader, Socket, KeepAliveMaxRequests - 1, IsSecure);
+                                try {
+					new HTTPContext(Server, Reader, Socket, KeepAliveMaxRequests - 1, IsSecure);
+				} catch (Exception ex) {
+					Server.RaiseOnError(this, ex);
+					Reader.Close();
+				}
 			} else {
 				Close();
 			}
